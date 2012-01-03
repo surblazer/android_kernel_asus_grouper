@@ -1673,7 +1673,7 @@ int security_capset(struct cred *new, const struct cred *old,
 		    const kernel_cap_t *effective,
 		    const kernel_cap_t *inheritable,
 		    const kernel_cap_t *permitted);
-int security_capable(struct user_namespace *ns, const struct cred *cred,
+int security_capable(const struct cred *cred, struct user_namespace *ns,
 			int cap);
 int security_capable_noaudit(const struct cred *cred, struct user_namespace *ns,
 			     int cap);
@@ -1894,8 +1894,8 @@ static inline int security_capset(struct cred *new,
 	return cap_capset(new, old, effective, inheritable, permitted);
 }
 
-static inline int security_capable(struct user_namespace *ns,
-				   const struct cred *cred, int cap)
+static inline int security_capable(const struct cred *cred,
+				   struct user_namespace *ns, int cap)
 {
 	return cap_capable(cred, ns, cap, SECURITY_CAP_AUDIT);
 }
