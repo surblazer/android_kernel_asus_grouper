@@ -29,6 +29,7 @@
 #include <linux/ramfs.h>
 #include <linux/log2.h>
 #include <linux/idr.h>
+#include <linux/init.h>		/* init_rootfs */
 #include <linux/fs_struct.h>
 #include <linux/fsnotify.h>
 #include <linux/proc_fs.h>
