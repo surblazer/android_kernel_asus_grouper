@@ -38,8 +38,6 @@
 #define	AL3010_ADC_LSB	0x0c
 #define	AL3010_ADC_MSB	0x0d
 
-
-bool flagLoadAl3010Config = false;
 static int calibration_base_lux = 1000;
 static int calibration_regs = 880; // default K value 880 is average K value of PR devices
 static int default_calibration_regs = 880;
@@ -81,7 +79,6 @@ struct al3010_data {
 static int revise_lux_times = 2;
 static bool al3010_hardware_fail = false;
 
-static int al3010_update_calibration();
 static int al3010_chip_resume(struct al3010_data *data);
 /*
  * register access helpers
@@ -200,10 +197,6 @@ static int al3010_get_adc_value(struct i2c_client *client)
 	if (msb < 0)
 		return msb;
 
-	if(!flagLoadAl3010Config){
-		al3010_update_calibration();
-		flagLoadAl3010Config = true;
-	}
 
 	//range = al3010_get_range(client);
 	//printk("light sesnor info : calibration_base_lux = %d\n",calibration_base_lux);
@@ -234,16 +227,6 @@ static int al3010_get_reg_value(struct i2c_client *client)
 	range = al3010_get_range(client);
 	return (u16)((msb << 8) | lsb);
 	//return (u32)(((msb << 8) | lsb) * range) >> 16;
-}
-
-/*
- * light sensor calibration
- */
-
-static int al3010_update_calibration()
-{
-	pr_err("No, NVIDIA, in fact you CANNOT read from userspace filesystems in the kernel - dmitrygr!\n");
-	return 0;
 }
 
 /*
@@ -288,12 +271,6 @@ static ssize_t al3010_show_reg(struct device *dev,
 	return sprintf(buf, "%d\n", al3010_get_reg_value(client));
 }
 
-/* refresh calibration */
-static ssize_t al3010_refresh_calibration(struct device *dev,
-				 struct device_attribute *attr, char *buf)
-{
-	return sprintf(buf,"%d\n",al3010_update_calibration());
-}
 
 /* revise lux */
 static ssize_t al3010_show_revise_lux(struct device *dev,
@@ -358,32 +335,34 @@ static ssize_t al3010_show_calib(struct device *dev, struct device_attribute *at
         return sprintf(buf, "%u\n", calibration_regs);
 }
 
-static ssize_t al3010_store_calib(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+static ssize_t al3010_store_calib(struct device *dev, struct device_attribute *attr,
+				const char *buf, size_t count)
 {
 	unsigned long val;
 
-	int err = kstrtoul_from_user(buf, count, 10, &val);
-	if (err)
+	int err = kstrtoul(buf, 10, &val);
+	if (err < 0)
 		return err;
 
 	calibration_regs = val;
+
+	dev_info(dev, "calibration data successfully loaded\n");
+
 	return count;
 }
 
 static SENSOR_DEVICE_ATTR(show_reg, 0644, al3010_show_reg, NULL, 1);
 static SENSOR_DEVICE_ATTR(show_lux, 0644, al3010_show_lux, NULL, 2);
 static SENSOR_DEVICE_ATTR(lightsensor_status, 0644, al3010_show_power_state, NULL, 3);
-static SENSOR_DEVICE_ATTR(refresh_cal, 0644, al3010_refresh_calibration, NULL, 4);
-static SENSOR_DEVICE_ATTR(show_revise_lux, 0644, al3010_show_revise_lux, NULL, 5);
-static SENSOR_DEVICE_ATTR(show_default_lux, 0644, al3010_show_default_lux, NULL, 6);
-static SENSOR_DEVICE_ATTR(power_on,0644,al3010_power_on,NULL,7);
-static SENSOR_DEVICE_ATTR(calibration, 0644, al3010_show_calib, al3010_store_calib, 8);
+static SENSOR_DEVICE_ATTR(show_revise_lux, 0644, al3010_show_revise_lux, NULL, 4);
+static SENSOR_DEVICE_ATTR(show_default_lux, 0644, al3010_show_default_lux, NULL, 5);
+static SENSOR_DEVICE_ATTR(power_on, 0644, al3010_power_on, NULL, 6);
+static SENSOR_DEVICE_ATTR(calibration, 0644, al3010_show_calib, al3010_store_calib, 7);
 
 static struct attribute *al3010_attributes[] = {
 	&sensor_dev_attr_show_reg.dev_attr.attr,
 	&sensor_dev_attr_show_lux.dev_attr.attr,
 	&sensor_dev_attr_lightsensor_status.dev_attr.attr,
-	&sensor_dev_attr_refresh_cal.dev_attr.attr,
 	&sensor_dev_attr_show_revise_lux.dev_attr.attr,
 	&sensor_dev_attr_show_default_lux.dev_attr.attr,
 	&sensor_dev_attr_power_on.dev_attr.attr,
