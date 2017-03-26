@@ -649,13 +649,7 @@ static void sdcardfs_put_link(struct dentry *dentry, struct nameidata *nd,
 static int sdcardfs_permission(struct inode *inode, int mask)
 {
 	int err;
-	struct inode *top = SDCARDFS_I(inode)->top;
-
-	/* Ensure owner is up to date */
-	if (inode->i_uid != top->i_uid) {
-		SDCARDFS_I(inode)->d_uid = SDCARDFS_I(top)->d_uid;
-		fix_derived_permission(inode);
-	}
+	return 0;
 
 	/*
 	 * Permission check on sdcardfs inode.
