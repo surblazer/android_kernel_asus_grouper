@@ -447,8 +447,7 @@ static int smb347_pin_control(bool state)
 	struct i2c_client *client = charger->client;
 	u8 ret = 0;
 
-	mutex_lock(&charger->pinctrl_lock);
-
+	printk("smb347_charger_enable %d\n",state);
 	if (state) {
 		/*Pin Controls -active low */
 		ret = smb347_update_reg(client, smb347_PIN_CTRL, PIN_ACT_LOW);
@@ -1348,7 +1347,7 @@ static void dockin_isr_work_function(struct work_struct *dat)
 static ssize_t smb347_reg_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct i2c_client *client = charger->client;
-	uint8_t config_reg[15], cmd_reg[1], status_reg[10];
+	uint8_t config_reg[15], cmd_reg[2], status_reg[11];
 	char tmp_buf[64];
 	int i, cfg_ret, cmd_ret, sts_ret = 0;
 
@@ -1405,6 +1404,91 @@ static void smb347_default_setback(void)
 		dev_err(&client->dev, "%s() error in configuring charger..\n", __func__);
 	}
 }
+
+static int smb347_temp_limit_setting(void)
+{
+	struct i2c_client *client = charger->client;
+	int ret = 0, retval, val;
+
+	/* Enable volatile writes to registers */
+	ret = smb347_volatile_writes(client, smb347_ENABLE_WRITE);
+	if (ret < 0) {
+		dev_err(&client->dev, "%s() error in configuring charger..\n",
+								__func__);
+		goto error;
+	}
+	val = smb347_read(client, smb347_HRD_SFT_TEMP);
+	if (val < 0) {
+		dev_err(&client->dev, "%s(): Failed in reading 0x%02x",
+				__func__, smb347_HRD_SFT_TEMP);
+		goto error;
+	}
+	val &= 0xcf;
+	/* Set Hard Limit Hot Temperature 59 Degree */
+	ret = smb347_write(client, smb347_HRD_SFT_TEMP, val | 0x20);
+	if (ret < 0) {
+		dev_err(&client->dev, "%s(): Failed in writing 0x%02x to register"
+			"0x%02x\n", __func__, val, smb347_HRD_SFT_TEMP);
+		goto error;
+	}
+	 /* Disable volatile writes to registers */
+	ret = smb347_volatile_writes(client, smb347_DISABLE_WRITE);
+	if (ret < 0) {
+		dev_err(&client->dev, "%s() error in configuring charger..\n",
+								__func__);
+		goto error;
+	}
+	return 0;
+error:
+	return -1;
+}
+
+int smb347_config_thermal_charging(int temp)
+{
+	struct i2c_client *client = charger->client;
+	int ret = 0, retval, setting = 0;
+
+	mdelay(150);
+	SMB_NOTICE("temp=%d\n", temp);
+
+	ret = smb347_volatile_writes(client, smb347_ENABLE_WRITE);
+		if (ret < 0) {
+			dev_err(&client->dev, "%s() charger enable write error..\n", __func__);
+			goto error;
+	}
+
+	/*charger enable/disable*/
+	retval = smb347_read(client, smb347_PIN_CTRL);
+	if (retval < 0) {
+		dev_err(&client->dev, "%s(): Failed in reading 0x%02x",
+				__func__, smb347_PIN_CTRL);
+		goto error;
+	}
+
+	setting = retval & ENABLE_PIN_CTRL_MASK;
+	if (temp > BAT_Hot_Limit) {
+		if (setting != 0x40) {
+			SMB_NOTICE("Charger disable\n");
+			smb347_charger_enable(false);
+		} else
+			SMB_NOTICE("Bypass charger disable\n");
+	} else {
+		if (setting != 0x60) {
+			SMB_NOTICE("Charger enable\n");
+			smb347_charger_enable(true);
+		} else
+			SMB_NOTICE("Bypass charger enable\n");
+	}
+
+	ret = smb347_volatile_writes(client, smb347_DISABLE_WRITE);
+	if (ret < 0) {
+		dev_err(&client->dev, "%s() charger enable write error..\n", __func__);
+		goto error;
+	}
+error:
+	return ret;
+}
+EXPORT_SYMBOL(smb347_config_thermal_charging);
 
 int smb347_event_fi(void) {
     // called by usbhost.c sysfs change from user space
@@ -1493,90 +1577,6 @@ int smb347_event_fastcharge(void) {
     }
 }
 
-static int smb347_temp_limit_setting(void)
-{
-	struct i2c_client *client = charger->client;
-	int ret = 0, retval, val;
-
-	/* Enable volatile writes to registers */
-	ret = smb347_volatile_writes(client, smb347_ENABLE_WRITE);
-	if (ret < 0) {
-		dev_err(&client->dev, "%s() error in configuring charger..\n",
-								__func__);
-		goto error;
-	}
-	val = smb347_read(client, smb347_HRD_SFT_TEMP);
-	if (val < 0) {
-		dev_err(&client->dev, "%s(): Failed in reading 0x%02x",
-				__func__, smb347_HRD_SFT_TEMP);
-		goto error;
-	}
-	val &= 0xcf;
-	/* Set Hard Limit Hot Temperature 59 Degree */
-	ret = smb347_write(client, smb347_HRD_SFT_TEMP, val | 0x20);
-	if (ret < 0) {
-		dev_err(&client->dev, "%s(): Failed in writing 0x%02x to register"
-			"0x%02x\n", __func__, val, smb347_HRD_SFT_TEMP);
-		goto error;
-	}
-	 /* Disable volatile writes to registers */
-	ret = smb347_volatile_writes(client, smb347_DISABLE_WRITE);
-	if (ret < 0) {
-		dev_err(&client->dev, "%s() error in configuring charger..\n",
-								__func__);
-		goto error;
-	}
-	return 0;
-error:
-	return -1;
-}
-
-int smb347_config_thermal_charging(int temp)
-{
-	struct i2c_client *client = charger->client;
-	int ret = 0, retval, setting = 0;
-
-	mdelay(150);
-	SMB_NOTICE("temp=%d\n", temp);
-
-	ret = smb347_volatile_writes(client, smb347_ENABLE_WRITE);
-		if (ret < 0) {
-			dev_err(&client->dev, "%s() charger enable write error..\n", __func__);
-			goto error;
-	}
-
-	/*charger enable/disable*/
-	retval = smb347_read(client, smb347_PIN_CTRL);
-	if (retval < 0) {
-		dev_err(&client->dev, "%s(): Failed in reading 0x%02x",
-				__func__, smb347_PIN_CTRL);
-		goto error;
-	}
-
-	setting = retval & ENABLE_PIN_CTRL_MASK;
-	if (temp > BAT_Hot_Limit) {
-		if (setting != 0x40) {
-			SMB_NOTICE("Charger disable\n");
-			smb347_charger_enable(false);
-		} else
-			SMB_NOTICE("Bypass charger disable\n");
-	} else {
-		if (setting != 0x60) {
-			SMB_NOTICE("Charger enable\n");
-			smb347_charger_enable(true);
-		} else
-			SMB_NOTICE("Bypass charger enable\n");
-	}
-
-	ret = smb347_volatile_writes(client, smb347_DISABLE_WRITE);
-	if (ret < 0) {
-		dev_err(&client->dev, "%s() charger enable write error..\n", __func__);
-		goto error;
-	}
-error:
-	return ret;
-}
-EXPORT_SYMBOL(smb347_config_thermal_charging);
 
 static int __devinit smb347_probe(struct i2c_client *client,
 			const struct i2c_device_id *id)
@@ -1750,4 +1750,6 @@ module_exit(smb347_exit);
 MODULE_AUTHOR("Syed Rafiuddin <srafiuddin@nvidia.com>");
 MODULE_DESCRIPTION("smb347 Battery-Charger");
 MODULE_LICENSE("GPL");
+
+
 
