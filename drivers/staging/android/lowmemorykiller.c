@@ -328,7 +328,6 @@ static int lowmem_shrink(struct shrinker *s, struct shrink_control *sc)
 		return 0;
 
         other_free = global_page_state(NR_FREE_PAGES) - totalreserve_pages;
-	tune_lmk_param(&other_free, &other_file, sc);
         if (global_page_state(NR_SHMEM) + total_swapcache_pages <
                 global_page_state(NR_FILE_PAGES))
                 other_file = global_page_state(NR_FILE_PAGES) -
@@ -338,6 +337,8 @@ static int lowmem_shrink(struct shrinker *s, struct shrink_control *sc)
 
         else
                 other_file = 0;
+
+	tune_lmk_param(&other_free, &other_file, sc);
 
         if (lowmem_adj_size < array_size)
                 array_size = lowmem_adj_size;
