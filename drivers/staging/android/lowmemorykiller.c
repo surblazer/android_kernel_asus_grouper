@@ -265,6 +265,36 @@ void tune_lmk_zone_param(struct zonelist *zonelist, int classzone_idx,
 	}
 }
 
+#ifdef CONFIG_HIGHMEM
+void adjust_gfp_mask(gfp_t *gfp_mask)
+{
+	struct zone *preferred_zone;
+	struct zonelist *zonelist;
+	enum zone_type high_zoneidx;
+
+	if (current_is_kswapd()) {
+		zonelist = node_zonelist(0, *gfp_mask);
+		high_zoneidx = gfp_zone(*gfp_mask);
+		first_zones_zonelist(zonelist, high_zoneidx, NULL,
+			&preferred_zone);
+
+		if (high_zoneidx == ZONE_NORMAL) {
+			if (zone_watermark_ok_safe(preferred_zone, 0,
+				high_wmark_pages(preferred_zone), 0,
+				0))
+				*gfp_mask |= __GFP_HIGHMEM;
+		}
+		else if (high_zoneidx == ZONE_HIGHMEM) {
+			*gfp_mask |= __GFP_HIGHMEM;
+		}
+	}
+}
+#else
+void adjust_gfp_mask(gfp_t *unused)
+{
+}
+#endif
+
 void tune_lmk_param(int *other_free, int *other_file, struct shrink_control *sc)
 {
 	gfp_t gfp_mask;
@@ -274,6 +304,8 @@ void tune_lmk_param(int *other_free, int *other_file, struct shrink_control *sc)
 	unsigned long balance_gap;
 
 	gfp_mask = sc->gfp_mask;
+	adjust_gfp_mask(&gfp_mask); 
+	
 	zonelist = node_zonelist(0, gfp_mask);
 	high_zoneidx = gfp_zone(gfp_mask);
 	first_zones_zonelist(zonelist, high_zoneidx, NULL, &preferred_zone);
@@ -418,9 +450,12 @@ static int lowmem_shrink(struct shrinker *s, struct shrink_control *sc)
         }
         if (selected) {
                 lowmem_print(1, "Killing '%s' (%d), adj %d,\n" \
-                                "   to free %ldkB on behalf of '%s' (%d) because\n" \
-                                "   cache %ldkB is below limit %ldkB for oom_score_adj %d\n" \
-                                "   Free memory is %ldkB above reserved\n",
+                                "   to free %dkB on behalf of '%s' (%d) because\n" \
+                                "   cache %dkB is below limit %dkB for oom_score_adj %d\n" \
+                                "   Free memory is %dkB above reserved\n" \
+								"   Total reserve is %dkB\n" \
+								"   Total free pages is %dkB\n" \
+								"   Total file cache is %dkB\n",
                              selected->comm, selected->pid,
                              selected_oom_score_adj,
                              selected_tasksize * (long)(PAGE_SIZE / 1024),
@@ -428,7 +463,10 @@ static int lowmem_shrink(struct shrinker *s, struct shrink_control *sc)
                              other_file * (long)(PAGE_SIZE / 1024),
                              minfree * (long)(PAGE_SIZE / 1024),
                              min_score_adj,
-                             other_free * (long)(PAGE_SIZE / 1024));
+                             other_free * (long)(PAGE_SIZE / 1024),
+                             totalreserve_pages * (long)(PAGE_SIZE / 1024),
+							 global_page_state(NR_FREE_PAGES) * (long)(PAGE_SIZE / 1024),
+							 global_page_state(NR_FILE_PAGES) * (long)(PAGE_SIZE / 1024));
                 lowmem_deathpending_timeout = jiffies + HZ;
                 set_tsk_thread_flag(selected, TIF_MEMDIE);
                 send_sig(SIGKILL, selected, 0);
