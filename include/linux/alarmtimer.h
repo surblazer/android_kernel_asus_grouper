@@ -18,11 +18,6 @@ enum alarmtimer_restart {
 	ALARMTIMER_RESTART,
 };
 
-
-#define ALARMTIMER_STATE_INACTIVE	0x00
-#define ALARMTIMER_STATE_ENQUEUED	0x01
-#define ALARMTIMER_STATE_CALLBACK	0x02
-
 /**
  * struct alarm - Alarm timer structure
  * @node:	timerqueue node for adding to the event list this value
@@ -37,7 +32,7 @@ struct alarm {
 	struct timerqueue_node	node;
 	enum alarmtimer_restart	(*function)(struct alarm *, ktime_t now);
 	enum alarmtimer_type	type;
-	int			state;
+	bool			enabled;
 	void			*data;
 };
 
@@ -47,32 +42,5 @@ void alarm_start(struct alarm *alarm, ktime_t start);
 void alarm_cancel(struct alarm *alarm);
 
 u64 alarm_forward(struct alarm *alarm, ktime_t now, ktime_t interval);
-
-/*
- * A alarmtimer is active, when it is enqueued into timerqueue or the
- * callback function is running.
- */
-static inline int alarmtimer_active(const struct alarm *timer)
-{
-	return timer->state != ALARMTIMER_STATE_INACTIVE;
-}
-
-/*
- * Helper function to check, whether the timer is on one of the queues
- */
-static inline int alarmtimer_is_queued(struct alarm *timer)
-{
-	return timer->state & ALARMTIMER_STATE_ENQUEUED;
-}
-
-/*
- * Helper function to check, whether the timer is running the callback
- * function
- */
-static inline int alarmtimer_callback_running(struct alarm *timer)
-{
-	return timer->state & ALARMTIMER_STATE_CALLBACK;
-}
-
 
 #endif
