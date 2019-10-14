@@ -80,7 +80,7 @@ static int has_wakealarm(struct device *dev, void *name_ptr)
  * If one has not already been chosen, it checks to see if a
  * functional rtc device is available.
  */
-struct rtc_device *alarmtimer_get_rtcdev(void)
+static struct rtc_device *alarmtimer_get_rtcdev(void)
 {
 	struct device *dev;
 	char *str;
@@ -107,59 +107,11 @@ struct rtc_device *alarmtimer_get_rtcdev(void)
 
 	return ret;
 }
-
-static int alarmtimer_rtc_add_device(struct device *dev,
-				struct class_interface *class_intf)
-{
-	unsigned long flags;
-	struct rtc_device *rtc = to_rtc_device(dev);
-
-	if (rtcdev)
-		return -EBUSY;
-
-	if (!rtc->ops->set_alarm)
-		return -1;
-	if (!device_may_wakeup(rtc->dev.parent))
-		return -1;
-
-	spin_lock_irqsave(&rtcdev_lock, flags);
-	if (!rtcdev) {
-		rtcdev = rtc;
-		/* hold a reference so it doesn't go away */
-		get_device(dev);
-	}
-	spin_unlock_irqrestore(&rtcdev_lock, flags);
-	return 0;
-}
-
-static inline void alarmtimer_rtc_timer_init(void)
-{
-	rtc_timer_init(&rtctimer, NULL, NULL);
-}
-
-static struct class_interface alarmtimer_rtc_interface = {
-	.add_dev = &alarmtimer_rtc_add_device,
-};
-
-static int alarmtimer_rtc_interface_setup(void)
-{
-	alarmtimer_rtc_interface.class = rtc_class;
-	return class_interface_register(&alarmtimer_rtc_interface);
-}
-static void alarmtimer_rtc_interface_remove(void)
-{
-	class_interface_unregister(&alarmtimer_rtc_interface);
-}
 #else
-struct rtc_device *alarmtimer_get_rtcdev(void)
-{
-	return NULL;
-}
-#define rtcdev (NULL)
-static inline int alarmtimer_rtc_interface_setup(void) { return 0; }
-static inline void alarmtimer_rtc_interface_remove(void) { }
-static inline void alarmtimer_rtc_timer_init(void) { }
+#define alarmtimer_get_rtcdev() (0)
+#define rtcdev (0)
 #endif
+
 
 /**
  * alarmtimer_enqueue - Adds an alarm timer to an alarm_base timerqueue
@@ -821,7 +773,6 @@ static struct platform_driver alarmtimer_driver = {
  */
 static int __init alarmtimer_init(void)
 {
-	struct platform_device *pdev;
 	int error = 0;
 	int i;
 	struct k_clock alarm_clock = {
@@ -833,8 +784,6 @@ static int __init alarmtimer_init(void)
 		.timer_get	= alarm_timer_get,
 		.nsleep		= alarm_timer_nsleep,
 	};
-
-	alarmtimer_rtc_timer_init();
 
 	posix_timers_register_clock(CLOCK_REALTIME_ALARM, &alarm_clock);
 	posix_timers_register_clock(CLOCK_BOOTTIME_ALARM, &alarm_clock);
@@ -852,26 +801,10 @@ static int __init alarmtimer_init(void)
 				HRTIMER_MODE_ABS);
 		alarm_bases[i].timer.function = alarmtimer_fired;
 	}
-
-	error = alarmtimer_rtc_interface_setup();
-	if (error)
-		return error;
-
 	error = platform_driver_register(&alarmtimer_driver);
-	if (error)
-		goto out_if;
+	platform_device_register_simple("alarmtimer", -1, NULL, 0);
 
-	pdev = platform_device_register_simple("alarmtimer", -1, NULL, 0);
-	if (IS_ERR(pdev)) {
-		error = PTR_ERR(pdev);
-		goto out_drv;
-	}
-	return 0;
-
-out_drv:
-	platform_driver_unregister(&alarmtimer_driver);
-out_if:
-	alarmtimer_rtc_interface_remove();
 	return error;
 }
 device_initcall(alarmtimer_init);
+
