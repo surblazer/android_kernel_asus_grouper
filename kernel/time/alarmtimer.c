@@ -196,7 +196,7 @@ static enum hrtimer_restart alarmtimer_fired(struct hrtimer *timer)
 		}
 		spin_unlock_irqrestore(&base->lock, flags);
 		if (alarm->function)
-			alarm->function(alarm, now);
+			alarm->function(alarm);
 		spin_lock_irqsave(&base->lock, flags);
 	}
 
@@ -299,7 +299,7 @@ static void alarmtimer_freezerset(ktime_t absexp, enum alarmtimer_type type)
  * @function: callback that is run when the alarm fires
  */
 void alarm_init(struct alarm *alarm, enum alarmtimer_type type,
-		enum alarmtimer_restart (*function)(struct alarm *, ktime_t))
+		void (*function)(struct alarm *))
 {
 	timerqueue_init(&alarm->node);
 	alarm->period = ktime_set(0, 0);
@@ -365,15 +365,12 @@ static enum alarmtimer_type clock2alarm(clockid_t clockid)
  *
  * Posix timer callback for expired alarm timers.
  */
-static enum alarmtimer_restart alarm_handle_timer(struct alarm *alarm,
-							ktime_t now)
+static void alarm_handle_timer(struct alarm *alarm)
 {
 	struct k_itimer *ptr = container_of(alarm, struct k_itimer,
 						it.alarmtimer);
 	if (posix_timer_event(ptr, 0) != 0)
 		ptr->it_overrun++;
-
-	return ALARMTIMER_NORESTART;
 }
 
 /**
@@ -512,15 +509,13 @@ static int alarm_timer_set(struct k_itimer *timr, int flags,
  *
  * Wakes up the task that set the alarmtimer
  */
-static enum alarmtimer_restart alarmtimer_nsleep_wakeup(struct alarm *alarm,
-								ktime_t now)
+static void alarmtimer_nsleep_wakeup(struct alarm *alarm)
 {
 	struct task_struct *task = (struct task_struct *)alarm->data;
 
 	alarm->data = NULL;
 	if (task)
 		wake_up_process(task);
-	return ALARMTIMER_NORESTART;
 }
 
 /**
