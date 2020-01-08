@@ -943,7 +943,7 @@ static u32 cfg80211_calculate_bitrate_vht(struct rate_info *rate)
 	return (bitrate + 50000) / 100000;
 }
 
-u16 cfg80211_calculate_bitrate(struct rate_info *rate)
+u32 cfg80211_calculate_bitrate(struct rate_info *rate)
 {
 	int modulation, streams, bitrate;
 
@@ -979,6 +979,7 @@ u16 cfg80211_calculate_bitrate(struct rate_info *rate)
 	/* do NOT round down here */
 	return (bitrate + 50000) / 100000;
 }
+EXPORT_SYMBOL(cfg80211_calculate_bitrate);
 
 int cfg80211_validate_beacon_int(struct cfg80211_registered_device *rdev,
 				 u32 beacon_int)

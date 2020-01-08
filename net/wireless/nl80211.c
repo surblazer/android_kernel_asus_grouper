@@ -1006,6 +1006,8 @@ static int nl80211_send_wiphy(struct sk_buff *msg, u32 pid, u32 seq, int flags,
 	if (nl80211_put_iface_combinations(&dev->wiphy, msg))
 		goto nla_put_failure;
 
+    NLA_PUT_U32(msg, NL80211_ATTR_FEATURE_FLAGS, dev->wiphy.features);
+
 	if (dev->wiphy.flags & WIPHY_FLAG_HAVE_AP_SME)
 		NLA_PUT_U32(msg, NL80211_ATTR_DEVICE_AP_SME,
 			    dev->wiphy.ap_sme_capa);
@@ -2164,50 +2166,34 @@ static bool nl80211_put_sta_rate(struct sk_buff *msg, struct rate_info *info,
 				 int attr)
 {
 	struct nlattr *rate;
-	u16 bitrate;
+	u32 bitrate;
+	u16 bitrate_compat;
 
 	rate = nla_nest_start(msg, attr);
 	if (!rate)
-		return false;
+		goto nla_put_failure;
 
 	/* cfg80211_calculate_bitrate will return 0 for mcs >= 32 */
 	bitrate = cfg80211_calculate_bitrate(info);
-	if (bitrate > 0)
-		nla_put_u16(msg, NL80211_RATE_INFO_BITRATE, bitrate);
-
-	if (info->flags & RATE_INFO_FLAGS_MCS) {
-		if (nla_put_u8(msg, NL80211_RATE_INFO_MCS, info->mcs))
-			return false;
-		if (info->flags & RATE_INFO_FLAGS_40_MHZ_WIDTH &&
-		    nla_put_flag(msg, NL80211_RATE_INFO_40_MHZ_WIDTH))
-			return false;
-		if (info->flags & RATE_INFO_FLAGS_SHORT_GI &&
-		    nla_put_flag(msg, NL80211_RATE_INFO_SHORT_GI))
-			return false;
-	} else if (info->flags & RATE_INFO_FLAGS_VHT_MCS) {
-		if (nla_put_u8(msg, NL80211_RATE_INFO_VHT_MCS, info->mcs))
-			return false;
-		if (nla_put_u8(msg, NL80211_RATE_INFO_VHT_NSS, info->nss))
-			return false;
-		if (info->flags & RATE_INFO_FLAGS_40_MHZ_WIDTH &&
-		    nla_put_flag(msg, NL80211_RATE_INFO_40_MHZ_WIDTH))
-			return false;
-		if (info->flags & RATE_INFO_FLAGS_80_MHZ_WIDTH &&
-		    nla_put_flag(msg, NL80211_RATE_INFO_80_MHZ_WIDTH))
-			return false;
-		if (info->flags & RATE_INFO_FLAGS_80P80_MHZ_WIDTH &&
-		    nla_put_flag(msg, NL80211_RATE_INFO_80P80_MHZ_WIDTH))
-			return false;
-		if (info->flags & RATE_INFO_FLAGS_160_MHZ_WIDTH &&
-		    nla_put_flag(msg, NL80211_RATE_INFO_160_MHZ_WIDTH))
-			return false;
-		if (info->flags & RATE_INFO_FLAGS_SHORT_GI &&
-		    nla_put_flag(msg, NL80211_RATE_INFO_SHORT_GI))
-			return false;
-	}
+	/* report 16-bit bitrate only if we can */
+	bitrate_compat = bitrate < (1UL << 16) ? bitrate : 0;
+	if ((bitrate > 0 &&
+	     nla_put_u32(msg, NL80211_RATE_INFO_BITRATE32, bitrate)) ||
+	    (bitrate_compat > 0 &&
+	     nla_put_u16(msg, NL80211_RATE_INFO_BITRATE, bitrate_compat)) ||
+	    ((info->flags & RATE_INFO_FLAGS_MCS) &&
+	     nla_put_u8(msg, NL80211_RATE_INFO_MCS, info->mcs)) ||
+	    ((info->flags & RATE_INFO_FLAGS_40_MHZ_WIDTH) &&
+	     nla_put_flag(msg, NL80211_RATE_INFO_40_MHZ_WIDTH)) ||
+	    ((info->flags & RATE_INFO_FLAGS_SHORT_GI) &&
+	     nla_put_flag(msg, NL80211_RATE_INFO_SHORT_GI)))
+		goto nla_put_failure;
 
 	nla_nest_end(msg, rate);
 	return true;
+
+nla_put_failure:
+	return false;
 }
 
 static int nl80211_send_station(struct sk_buff *msg, u32 pid, u32 seq,

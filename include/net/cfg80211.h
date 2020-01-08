@@ -1892,7 +1892,7 @@ struct wiphy {
 	/* Supported interface modes, OR together BIT(NL80211_IFTYPE_...) */
 	u16 interface_modes;
 
-	u32 flags;
+	u32 flags, features;
 
 	u32 ap_sme_capa;
 
@@ -3133,6 +3133,14 @@ void cfg80211_probe_status(struct net_device *dev, const u8 *addr,
 void cfg80211_report_obss_beacon(struct wiphy *wiphy,
 				 const u8 *frame, size_t len,
 				 int freq, gfp_t gfp);
+
+/*
+ * cfg80211_calculate_bitrate - calculate actual bitrate (in 100Kbps units)
+ * @rate: given rate_info to calculate bitrate from
+ *
+ * return 0 if MCS index >= 32
+ */
+u32 cfg80211_calculate_bitrate(struct rate_info *rate);
 
 /* Logging, debugging and troubleshooting/diagnostic helpers. */
 
