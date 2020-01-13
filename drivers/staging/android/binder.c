@@ -1954,7 +1954,7 @@ static int binder_thread_write(struct binder_proc *proc,
 		case BC_INCREFS_DONE:
 		case BC_ACQUIRE_DONE: {
 			void __user *node_ptr;
-			void __user *cookie;
+			void *cookie;
 			struct binder_node *node;
 
 			if (get_user(node_ptr, (void * __user *)ptr))
