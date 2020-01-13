@@ -23,7 +23,6 @@
 #include <linux/miscdevice.h>
 #include <linux/mm.h>
 #include <linux/module.h>
-#include <linux/rtmutex.h>
 #include <linux/mutex.h>
 #include <linux/nsproxy.h>
 #include <linux/poll.h>
@@ -41,7 +40,7 @@
 
 #define BINDER_MIN_ALLOC (1 * PAGE_SIZE)
 
-static DEFINE_RT_MUTEX(binder_main_lock);
+static DEFINE_RT_MUTEX(binder_lock);
 static DEFINE_MUTEX(binder_deferred_lock);
 static DEFINE_MUTEX(binder_mmap_lock);
 
@@ -2328,7 +2327,7 @@ retry:
 	thread->looper |= BINDER_LOOPER_STATE_WAITING;
 	if (wait_for_proc_work)
 		proc->ready_threads++;
-	rt_mutex_unlock(&binder_main_lock);
+	rt_mutex_unlock(&binder_lock);
 	if (wait_for_proc_work) {
 		if (!(thread->looper & (BINDER_LOOPER_STATE_REGISTERED |
 					BINDER_LOOPER_STATE_ENTERED))) {
@@ -2352,7 +2351,7 @@ retry:
 		} else
 			ret = wait_event_interruptible(thread->wait, binder_has_thread_work(thread));
 	}
-	rt_mutex_lock(&binder_main_lock);
+	rt_mutex_lock(&binder_lock);
 	if (wait_for_proc_work)
 		proc->ready_threads--;
 	thread->looper &= ~BINDER_LOOPER_STATE_WAITING;
@@ -2718,12 +2717,12 @@ static unsigned int binder_poll(struct file *filp,
 	struct binder_thread *thread = NULL;
 	int wait_for_proc_work;
 
-	rt_mutex_lock(&binder_main_lock);
+	rt_mutex_lock(&binder_lock);
 	thread = binder_get_thread(proc);
 
 	wait_for_proc_work = thread->transaction_stack == NULL &&
 		list_empty(&thread->todo) && thread->return_error == BR_OK;
-	rt_mutex_unlock(&binder_main_lock);
+	rt_mutex_unlock(&binder_lock);
 
 	if (wait_for_proc_work) {
 		if (binder_has_proc_work(proc, thread))
@@ -2755,7 +2754,7 @@ static long binder_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	if (ret)
 		return ret;
 
-	rt_mutex_lock(&binder_main_lock);
+	rt_mutex_lock(&binder_lock);
 	thread = binder_get_thread(proc);
 	if (thread == NULL) {
 		ret = -ENOMEM;
@@ -2871,7 +2870,7 @@ static long binder_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 err:
 	if (thread)
 		thread->looper &= ~BINDER_LOOPER_STATE_NEED_RETURN;
-	rt_mutex_unlock(&binder_main_lock);
+	rt_mutex_unlock(&binder_lock);
 	wait_event_interruptible(binder_user_error_wait, binder_stop_on_user_error < 2);
 	if (ret && ret != -ERESTARTSYS)
 		printk(KERN_INFO "binder: %d:%d ioctl %x %lx returned %d\n", proc->pid, current->pid, cmd, arg, ret);
@@ -3042,13 +3041,13 @@ static int binder_open(struct inode *nodp, struct file *filp)
 	proc->default_priority = task_nice(current);
 	INIT_LIST_HEAD(&proc->buffers);
 
-	rt_mutex_lock(&binder_main_lock);
+	rt_mutex_lock(&binder_lock);
 	binder_stats_created(BINDER_STAT_PROC);
 	hlist_add_head(&proc->proc_node, &binder_procs);
 	proc->pid = current->group_leader->pid;
 	INIT_LIST_HEAD(&proc->delivered_death);
 	filp->private_data = proc;
-	rt_mutex_unlock(&binder_main_lock);
+	rt_mutex_unlock(&binder_lock);
 
 	if (binder_debugfs_dir_entry_proc) {
 		char strbuf[11];
@@ -3241,7 +3240,7 @@ static void binder_deferred_func(struct work_struct *work)
 
 	int defer;
 	do {
-		rt_mutex_lock(&binder_main_lock);
+		rt_mutex_lock(&binder_lock);
 		mutex_lock(&binder_deferred_lock);
 		if (!hlist_empty(&binder_deferred_list)) {
 			proc = hlist_entry(binder_deferred_list.first,
@@ -3268,7 +3267,7 @@ static void binder_deferred_func(struct work_struct *work)
 		if (defer & BINDER_DEFERRED_RELEASE)
 			binder_deferred_release(proc); /* frees proc */
 
-		rt_mutex_unlock(&binder_main_lock);
+		rt_mutex_unlock(&binder_lock);
 		if (files)
 			put_files_struct(files);
 	} while (proc);
@@ -3609,7 +3608,7 @@ static int binder_state_show(struct seq_file *m, void *unused)
 	int do_lock = !binder_debug_no_lock;
 
 	if (do_lock)
-		rt_mutex_lock(&binder_main_lock);
+		rt_mutex_lock(&binder_lock);
 
 	seq_puts(m, "binder state:\n");
 
@@ -3621,7 +3620,7 @@ static int binder_state_show(struct seq_file *m, void *unused)
 	hlist_for_each_entry(proc, pos, &binder_procs, proc_node)
 		print_binder_proc(m, proc, 1);
 	if (do_lock)
-		rt_mutex_unlock(&binder_main_lock);
+		rt_mutex_unlock(&binder_lock);
 	return 0;
 }
 
@@ -3632,7 +3631,7 @@ static int binder_stats_show(struct seq_file *m, void *unused)
 	int do_lock = !binder_debug_no_lock;
 
 	if (do_lock)
-		rt_mutex_lock(&binder_main_lock);
+		rt_mutex_lock(&binder_lock);
 
 	seq_puts(m, "binder stats:\n");
 
@@ -3641,7 +3640,7 @@ static int binder_stats_show(struct seq_file *m, void *unused)
 	hlist_for_each_entry(proc, pos, &binder_procs, proc_node)
 		print_binder_proc_stats(m, proc);
 	if (do_lock)
-		rt_mutex_unlock(&binder_main_lock);
+		rt_mutex_unlock(&binder_lock);
 	return 0;
 }
 
@@ -3652,13 +3651,13 @@ static int binder_transactions_show(struct seq_file *m, void *unused)
 	int do_lock = !binder_debug_no_lock;
 
 	if (do_lock)
-		rt_mutex_lock(&binder_main_lock);
+		rt_mutex_lock(&binder_lock);
 
 	seq_puts(m, "binder transactions:\n");
 	hlist_for_each_entry(proc, pos, &binder_procs, proc_node)
 		print_binder_proc(m, proc, 0);
 	if (do_lock)
-		rt_mutex_unlock(&binder_main_lock);
+		rt_mutex_unlock(&binder_lock);
 	return 0;
 }
 
@@ -3671,7 +3670,7 @@ static int binder_proc_show(struct seq_file *m, void *unused)
 	bool valid_proc = false;
 
 	if (do_lock)
-		rt_mutex_lock(&binder_main_lock);
+		rt_mutex_lock(&binder_lock);
 
 	hlist_for_each_entry(itr, pos, &binder_procs, proc_node) {
 		if (itr == proc) {
@@ -3684,7 +3683,7 @@ static int binder_proc_show(struct seq_file *m, void *unused)
 		print_binder_proc(m, proc, 1);
 	}
 	if (do_lock)
-		rt_mutex_unlock(&binder_main_lock);
+		rt_mutex_unlock(&binder_lock);
 	return 0;
 }
 
