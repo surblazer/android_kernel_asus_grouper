@@ -103,12 +103,6 @@
 #define PR_MCE_KILL_GET 34
 
 /*
- * Get effective timerslack value for the process.
- * It can be higher than PR_GET_TIMERSLACK.
- */
-#define PR_GET_EFFECTIVE_TIMERSLACK 35
-
-/*
  * If no_new_privs is set, then operations that grant new privileges (i.e.
  * execve) will either fail or not grant them.  This affects suid/sgid,
  * file capabilities, and LSMs.
