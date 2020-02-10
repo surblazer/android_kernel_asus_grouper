@@ -1145,13 +1145,9 @@ ip_set_dump(struct sock *ctnl, struct sk_buff *skb,
 	if (unlikely(protocol_failed(attr)))
 		return -IPSET_ERR_PROTOCOL;
 
-	{
-		struct netlink_dump_control c = {
-			.dump = ip_set_dump_start,
-			.done = ip_set_dump_done,
-		};
-		return netlink_dump_start(ctnl, skb, nlh, &c);
-	}
+	return netlink_dump_start(ctnl, skb, nlh,
+				  ip_set_dump_start,
+				  ip_set_dump_done, 0);
 }
 
 /* Add, del and test */
