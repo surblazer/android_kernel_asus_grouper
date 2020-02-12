@@ -1727,7 +1727,7 @@ errout_skb:
 	return err;
 }
 
-int __netlink_dump_start(struct sock *ssk, struct sk_buff *skb,
+int netlink_dump_start(struct sock *ssk, struct sk_buff *skb,
 		       const struct nlmsghdr *nlh,
 		       int (*dump)(struct sk_buff *skb,
 				   struct netlink_callback *),
@@ -1756,28 +1756,19 @@ int __netlink_dump_start(struct sock *ssk, struct sk_buff *skb,
 		return -ECONNREFUSED;
 	}
 	nlk = nlk_sk(sk);
-
-	mutex_lock(nlk->cb_mutex);
 	/* A dump is in progress... */
+	mutex_lock(nlk->cb_mutex);
 	if (nlk->cb) {
 		mutex_unlock(nlk->cb_mutex);
 		netlink_destroy_callback(cb);
-		ret = -EBUSY;
-		goto out;
+		sock_put(sk);
+		return -EBUSY;
 	}
-	/* add reference of module which cb->dump belongs to */
-	if (!try_module_get(cb->module)) {
-		mutex_unlock(nlk->cb_mutex);
-		netlink_destroy_callback(cb);
-		ret = -EPROTONOSUPPORT;
-		goto out;
-	}
-
 	nlk->cb = cb;
 	mutex_unlock(nlk->cb_mutex);
 
 	ret = netlink_dump(sk);
-out:
+
 	sock_put(sk);
 
 	if (ret)
@@ -1788,7 +1779,7 @@ out:
 	 */
 	return -EINTR;
 }
-EXPORT_SYMBOL(__netlink_dump_start);
+EXPORT_SYMBOL(netlink_dump_start);
 
 void netlink_ack(struct sk_buff *in_skb, struct nlmsghdr *nlh, int err)
 {
