@@ -33,7 +33,6 @@
 #include <linux/stddef.h>
 
 #include <linux/inet_diag.h>
-#include <linux/sock_diag.h>
 
 static const struct inet_diag_handler **inet_diag_table;
 
@@ -46,7 +45,7 @@ struct inet_diag_entry {
 	u16 userlocks;
 };
 
-static struct sock *sdiagnl;
+static struct sock *idiagnl;
 
 #define INET_DIAG_PUT(skb, attrtype, attrlen) \
 	RTA_DATA(__RTA_PUT(skb, attrtype, attrlen))
@@ -57,7 +56,7 @@ static const struct inet_diag_handler *inet_diag_lock_handler(int type)
 {
 	if (!inet_diag_table[type])
 		request_module("net-pf-%d-proto-%d-type-%d", PF_NETLINK,
-			       NETLINK_SOCK_DIAG, type);
+			       NETLINK_INET_DIAG, type);
 
 	mutex_lock(&inet_diag_table_mutex);
 	if (!inet_diag_table[type])
@@ -309,7 +308,7 @@ static int inet_diag_get_exact(struct sk_buff *in_skb,
 		kfree_skb(rep);
 		goto out;
 	}
-	err = netlink_unicast(sdiagnl, rep, NETLINK_CB(in_skb).pid,
+	err = netlink_unicast(idiagnl, rep, NETLINK_CB(in_skb).pid,
 			      MSG_DONTWAIT);
 	if (err > 0)
 		err = 0;
@@ -869,112 +868,20 @@ static int inet_diag_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
 				return -EINVAL;
 		}
 
-		return netlink_dump_start(sdiagnl, skb, nlh,
-					  inet_diag_dump, NULL, 0);
+		return netlink_dump_start(idiagnl, skb, nlh,
+					  inet_diag_dump, NULL);
 	}
 
 	return inet_diag_get_exact(skb, nlh);
 }
 
-static int inet_diag_handler_dump(struct sk_buff *skb, struct nlmsghdr *h)
+static DEFINE_MUTEX(inet_diag_mutex);
+
+static void inet_diag_rcv(struct sk_buff *skb)
 {
-	int hdrlen = sizeof(struct inet_diag_req);
-
-	if (nlmsg_len(h) < hdrlen)
-		return -EINVAL;
-
-	if (h->nlmsg_flags & NLM_F_DUMP) {
-		return -EAFNOSUPPORT;
-	}
-
-	return -EAFNOSUPPORT;
-}
-
-static struct sock_diag_handler inet_diag_handler = {
-	.family = AF_INET,
-	.dump = inet_diag_handler_dump,
-};
-
-static struct sock_diag_handler inet6_diag_handler = {
-	.family = AF_INET6,
-	.dump = inet_diag_handler_dump,
-};
-
-static struct sock_diag_handler *sock_diag_handlers[AF_MAX];
-static DEFINE_MUTEX(sock_diag_table_mutex);
-
-int sock_diag_register(struct sock_diag_handler *hndl)
-{
-	int err = 0;
-
-	if (hndl->family > AF_MAX)
-		return -EINVAL;
-
-	mutex_lock(&sock_diag_table_mutex);
-	if (sock_diag_handlers[hndl->family])
-		err = -EBUSY;
-	else
-		sock_diag_handlers[hndl->family] = hndl;
-	mutex_unlock(&sock_diag_table_mutex);
-
-	return err;
-}
-
-void sock_diag_unregister(struct sock_diag_handler *hnld)
-{
-	int family = hnld->family;
-
-	if (family > AF_MAX)
-		return;
-
-	mutex_lock(&sock_diag_table_mutex);
-	BUG_ON(sock_diag_handlers[family] != hnld);
-	sock_diag_handlers[family] = NULL;
-	mutex_unlock(&sock_diag_table_mutex);
-}
-
-static inline struct sock_diag_handler *sock_diag_lock_handler(int family)
-{
-	mutex_lock(&sock_diag_table_mutex);
-	return sock_diag_handlers[family];
-}
-
-static inline void sock_diag_unlock_handler(struct sock_diag_handler *h)
-{
-	mutex_unlock(&sock_diag_table_mutex);
-}
-
-static int __sock_diag_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
-{
-	int err;
-	struct sock_diag_req *req = NLMSG_DATA(nlh);
-	struct sock_diag_handler *hndl;
-
-	if (nlmsg_len(nlh) < sizeof(*req))
-		return -EINVAL;
-
-	hndl = sock_diag_lock_handler(req->sdiag_family);
-	if (hndl == NULL)
-		err = -ENOENT;
-	else
-		err = hndl->dump(skb, nlh);
-	sock_diag_unlock_handler(hndl);
-
-	return err;
-}
-
-static int sock_diag_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
-{
-	return inet_diag_rcv_msg(skb, nlh);
-}
-
-static DEFINE_MUTEX(sock_diag_mutex);
-
-static void sock_diag_rcv(struct sk_buff *skb)
-{
-	mutex_lock(&sock_diag_mutex);
-	netlink_rcv_skb(skb, &sock_diag_rcv_msg);
-	mutex_unlock(&sock_diag_mutex);
+	mutex_lock(&inet_diag_mutex);
+	netlink_rcv_skb(skb, &inet_diag_rcv_msg);
+	mutex_unlock(&inet_diag_mutex);
 }
 
 int inet_diag_register(const struct inet_diag_handler *h)
@@ -1020,26 +927,13 @@ static int __init inet_diag_init(void)
 	if (!inet_diag_table)
 		goto out;
 
-	sdiagnl = netlink_kernel_create(&init_net, NETLINK_SOCK_DIAG, 0,
-					sock_diag_rcv, NULL, THIS_MODULE);
-	if (sdiagnl == NULL)
+	idiagnl = netlink_kernel_create(&init_net, NETLINK_INET_DIAG, 0,
+					inet_diag_rcv, NULL, THIS_MODULE);
+	if (idiagnl == NULL)
 		goto out_free_table;
-
-	err = sock_diag_register(&inet_diag_handler);
-	if (err)
-		goto out_free_nl;
-
-	err = sock_diag_register(&inet6_diag_handler);
-	if (err)
-		goto out_free_inet;
-
+	err = 0;
 out:
 	return err;
-
-out_free_inet:
-	sock_diag_unregister(&inet_diag_handler);
-out_free_nl:
-	netlink_kernel_release(sdiagnl);
 out_free_table:
 	kfree(inet_diag_table);
 	goto out;
@@ -1047,13 +941,11 @@ out_free_table:
 
 static void __exit inet_diag_exit(void)
 {
-	sock_diag_unregister(&inet6_diag_handler);
-	sock_diag_unregister(&inet_diag_handler);
-	netlink_kernel_release(sdiagnl);
+	netlink_kernel_release(idiagnl);
 	kfree(inet_diag_table);
 }
 
 module_init(inet_diag_init);
 module_exit(inet_diag_exit);
 MODULE_LICENSE("GPL");
-MODULE_ALIAS_NET_PF_PROTO(PF_NETLINK, NETLINK_SOCK_DIAG);
+MODULE_ALIAS_NET_PF_PROTO(PF_NETLINK, NETLINK_INET_DIAG);
